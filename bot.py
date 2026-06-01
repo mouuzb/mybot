@@ -1,6 +1,6 @@
 import os
 import asyncio
-print("MAIN.PY STARTED")
+print("[+] BOT.PY LOADED")
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -104,12 +104,14 @@ class Form(StatesGroup):
 # KEYBOARD
 # ---------------------------------------------------------------------------
 def get_main_kb():
+    keyboard = []
+    if WEBAPP_URL:
+        keyboard.append([KeyboardButton(text="📚 Quiz (WebApp)", web_app=WebAppInfo(url=WEBAPP_URL))])
+    keyboard.append([KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")])
+    if WEBAPP_URL:
+        keyboard.append([KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📚 Quiz (WebApp)", web_app=WebAppInfo(url=WEBAPP_URL))],
-            [KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")],
-            [KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))]
-        ],
+        keyboard=keyboard,
         resize_keyboard=True
     )
 
