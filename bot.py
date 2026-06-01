@@ -1,5 +1,6 @@
 import os
 import asyncio
+print("MAIN.PY STARTED")
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
