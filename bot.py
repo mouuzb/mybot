@@ -106,8 +106,7 @@ class Form(StatesGroup):
 def get_main_kb():
     keyboard = []
     if WEBAPP_URL:
-        keyboard.append([KeyboardButton(text="📚 Quiz (WebApp)", web_app=WebAppInfo(url=WEBAPP_URL))])
-    keyboard.append([KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")])
+        keyboard.append([KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")])
     if WEBAPP_URL:
         keyboard.append([KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))])
     return ReplyKeyboardMarkup(
