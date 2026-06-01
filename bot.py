@@ -19,7 +19,7 @@ if WEBAPP_URL:
 
 # Admin telegram IDlari
 ADMIN_IDS = [7294699676, 123456789]
-_env_admin = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+_env_admin = os.getenv("ADMIN_ID", "").strip()
 if _env_admin and _env_admin.isdigit():
     ADMIN_IDS.append(int(_env_admin))
 
