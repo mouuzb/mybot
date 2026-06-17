@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 import random
@@ -7,14 +7,25 @@ import os
 import asyncio
 import datetime
 
-from database import get_db
+from database import get_db, DB_PATH
 import models
 import schemas
 
 router = APIRouter()
+import shutil
+
+@router.post("/restore-db")
+def restore_db(file: UploadFile = File(...)):
+    """Bazani tiklash uchun vaqtinchalik endpoint"""
+    try:
+        with open(DB_PATH, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"status": "success", "message": "Database restored successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Admin ID lari (Haqiqiy va Test)
-ALLOWED_ADMINS = ["7294699676", os.getenv("ADMIN_TELEGRAM_ID", "").strip()]
+ALLOWED_ADMINS = ["7294699676", "123456789", os.getenv("ADMIN_TELEGRAM_ID", "").strip()]
 
 # ---------------------------------------------------------------------------
 # YORDAMCHI: Bot status olish / yaratish

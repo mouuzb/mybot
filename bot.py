@@ -1,11 +1,10 @@
 import os
 import asyncio
-print("[+] BOT.PY LOADED")
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, FSInputFile, TelegramObject
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo, FSInputFile, TelegramObject, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.orm import Session
 from typing import Callable, Dict, Any, Awaitable
 from database import SessionLocal, init_db
@@ -19,7 +18,7 @@ if WEBAPP_URL:
 
 # Admin telegram IDlari
 ADMIN_IDS = [7294699676, 123456789]
-_env_admin = os.getenv("ADMIN_ID", "").strip()
+_env_admin = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
 if _env_admin and _env_admin.isdigit():
     ADMIN_IDS.append(int(_env_admin))
 
@@ -29,6 +28,10 @@ if not TOKEN:
 
 bot = Bot(token=TOKEN) if TOKEN else None
 dp = Dispatcher()
+
+# Majburiy obuna kanallari (Masalan: @channel1,@channel2)
+REQUIRED_CHANNELS = os.getenv("REQUIRED_CHANNELS", "").strip()
+CHANNELS = [ch.strip() for ch in REQUIRED_CHANNELS.split(",") if ch.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +89,113 @@ class BotRestrictionMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+# ---------------------------------------------------------------------------
+# MIDDLEWARE - Majburiy Obuna (Mandatory Channel Subscription)
+# ---------------------------------------------------------------------------
+def get_subscription_kb(channels: list):
+    keyboard = []
+    for idx, channel in enumerate(channels):
+        # Username yoki to'liq linklarni to'g'ri formatlash
+        username = channel.replace("@", "")
+        url = f"https://t.me/{username}"
+        keyboard.append([InlineKeyboardButton(text=f"📢 {idx+1}-kanalga a'zo bo'lish", url=url)])
+    keyboard.append([InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data="check_sub")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+class SubscriptionMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: Dict[str, Any]
+    ) -> Any:
+        if not CHANNELS:
+            return await handler(event, data)
+
+        user_id = None
+        if isinstance(event, types.Message):
+            user_id = event.from_user.id if event.from_user else None
+        elif isinstance(event, types.CallbackQuery):
+            user_id = event.from_user.id if event.from_user else None
+            # Obunani tekshirish tugmasini doim o'tkazib yuboramiz
+            if event.data == "check_sub":
+                return await handler(event, data)
+
+        if not user_id:
+            return await handler(event, data)
+
+        # Adminlarni tekshirmaymiz
+        if user_id in ADMIN_IDS:
+            return await handler(event, data)
+
+        # Obunalarni tekshirish
+        subscribed = True
+        for channel in CHANNELS:
+            try:
+                member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+                if member.status not in ["creator", "administrator", "member", "restricted"]:
+                    subscribed = False
+                    break
+            except Exception as e:
+                # Bot kanalda admin bo'lmasa yoki boshqa xatolik yuz bersa
+                print(f"[Subscription Check Error] {channel}: {e}")
+
+        if not subscribed:
+            if isinstance(event, types.Message):
+                await event.answer(
+                    "⚠️ Botdan foydalanish uchun quyidagi majburiy kanallarga a'zo bo'lishingiz kerak:",
+                    reply_markup=get_subscription_kb(CHANNELS)
+                )
+            elif isinstance(event, types.CallbackQuery):
+                await event.answer(
+                    "⚠️ Iltimos, avval majburiy kanallarga a'zo bo'ling!",
+                    show_alert=True
+                )
+            return  # Handler ishga tushmaydi
+
+        return await handler(event, data)
+
+
 # Middlewareni ro'yxatdan o'tkazish
 dp.message.middleware(BotRestrictionMiddleware())
 dp.callback_query.middleware(BotRestrictionMiddleware())
+dp.message.middleware(SubscriptionMiddleware())
+dp.callback_query.middleware(SubscriptionMiddleware())
+
+
+# ---------------------------------------------------------------------------
+# HANDLER - Obunani Tekshirish Callback
+# ---------------------------------------------------------------------------
+@dp.callback_query(F.data == "check_sub")
+async def check_subscription_callback(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    subscribed = True
+    for channel in CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status not in ["creator", "administrator", "member", "restricted"]:
+                subscribed = False
+                break
+        except Exception as e:
+            print(f"[Callback Subscription Check Error] {channel}: {e}")
+            
+    if subscribed:
+        await callback.message.edit_text(
+            "✅ Rahmat! Siz barcha majburiy kanallarga muvaffaqiyatli obuna bo'ldingiz.\n"
+            "Endi botdan bemalol foydalanishingiz mumkin.",
+            reply_markup=None
+        )
+        await callback.message.answer(
+            "Bot ishga tushdi. Quyidagi menyudan foydalanishingiz mumkin:",
+            reply_markup=get_main_kb()
+        )
+        await callback.answer()
+    else:
+        await callback.answer(
+            "❌ Siz hali barcha kanallarga a'zo bo'lmadingiz. Iltimos, a'zo bo'ling va qaytadan tekshiring.",
+            show_alert=True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -104,13 +211,12 @@ class Form(StatesGroup):
 # KEYBOARD
 # ---------------------------------------------------------------------------
 def get_main_kb():
-    keyboard = []
-    if WEBAPP_URL:
-        keyboard.append([KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")])
-    if WEBAPP_URL:
-        keyboard.append([KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))])
     return ReplyKeyboardMarkup(
-        keyboard=keyboard,
+        keyboard=[
+            [KeyboardButton(text="📚 Quiz (WebApp)", web_app=WebAppInfo(url=WEBAPP_URL))],
+            [KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")],
+            [KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))]
+        ],
         resize_keyboard=True
     )
 
