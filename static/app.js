@@ -128,11 +128,76 @@ const app = {
                     this.showView('maintenanceView');
                     return true; // cheklangan holat
                 }
+
+                // Majburiy kanalga obuna tekshirish
+                if (data.is_subscribed === false && !isAdmin) {
+                    this._showSubscriptionModal(data.unsubscribed_channels || []);
+                    return true; // cheklangan holat
+                }
             }
         } catch (e) {
             console.error("Auth xatosi:", e);
         }
         return false; // cheklanmagan yoki admin
+    },
+
+    _showSubscriptionModal(channels) {
+        // Eski modalni o'chirish
+        const old = document.getElementById('subscriptionModal');
+        if (old) old.remove();
+
+        const channelBtns = channels.map(ch => `
+            <a href="https://t.me/${ch.replace('@','')}"
+               target="_blank"
+               style="display:flex;align-items:center;gap:10px;background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px 18px;color:#f1f5f9;text-decoration:none;font-weight:600;font-size:0.95rem;transition:0.2s;"
+               onmouseover="this.style.background='#334155'"
+               onmouseout="this.style.background='#1e293b'">
+                <span style="font-size:1.5rem;">📢</span>
+                <span>${ch}</span>
+                <span style="margin-left:auto;font-size:0.8rem;color:#38bdf8;">A'zo bo'lish →</span>
+            </a>
+        `).join('');
+
+        const modal = document.createElement('div');
+        modal.id = 'subscriptionModal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,0.97);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;';
+        modal.innerHTML = `
+            <div style="max-width:420px;width:100%;text-align:center;font-family:'Inter',sans-serif;">
+                <div style="font-size:3.5rem;margin-bottom:12px;">🔒</div>
+                <h2 style="color:#f1f5f9;font-size:1.4rem;font-weight:700;margin-bottom:8px;">Kanalga a'zo bo'ling</h2>
+                <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:24px;line-height:1.5;">Botdan foydalanish uchun quyidagi kanal(lar)ga a'zo bo'ling, so'ngra "Tekshirish" tugmasini bosing.</p>
+                <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px;">
+                    ${channelBtns}
+                </div>
+                <button id="checkSubBtn"
+                    style="width:100%;padding:16px;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border:none;border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;transition:0.2s;box-shadow:0 4px 20px rgba(99,102,241,0.4);"
+                    onmouseover="this.style.opacity='0.9'"
+                    onmouseout="this.style.opacity='1'">
+                    ✅ A'zo bo'ldim — Tekshirish
+                </button>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Tekshirish tugmasi
+        document.getElementById('checkSubBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('checkSubBtn');
+            btn.textContent = '⏳ Tekshirilmoqda...';
+            btn.disabled = true;
+
+            const isRestricted = await this.authUser();
+            if (!isRestricted) {
+                // Obuna qilindi!
+                modal.remove();
+                const urlParams = new URLSearchParams(window.location.search);
+                const startView = urlParams.get('view') || 'mainMenu';
+                this.showView(startView);
+            } else {
+                btn.textContent = '❌ Hali a\'zo emassiz. Qayta urinib ko\'ring';
+                btn.disabled = false;
+            }
+        });
     },
 
     // ------------------------------------------------------------------

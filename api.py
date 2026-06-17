@@ -27,6 +27,41 @@ def restore_db(file: UploadFile = File(...)):
 # Admin ID lari (Haqiqiy va Test)
 ALLOWED_ADMINS = ["7294699676", "123456789", os.getenv("ADMIN_TELEGRAM_ID", "").strip()]
 
+# Majburiy obuna kanallari
+_REQUIRED_CHANNELS_STR = os.getenv("REQUIRED_CHANNELS", "").strip()
+REQUIRED_CHANNELS = [ch.strip() for ch in _REQUIRED_CHANNELS_STR.split(",") if ch.strip()]
+
+async def _check_user_subscriptions(telegram_id: int) -> list:
+    """Foydalanuvchi barcha majburiy kanallarga obuna bo'lganligini tekshirish.
+    Obuna bo'lmagan kanallar ro'yxatini qaytaradi. Bo'sh ro'yxat = hammasi OK."""
+    if not REQUIRED_CHANNELS:
+        return []
+
+    bot_token = os.getenv("BOT_TOKEN", "")
+    if not bot_token:
+        return []
+
+    unsubscribed = []
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            for channel in REQUIRED_CHANNELS:
+                url = f"https://api.telegram.org/bot{bot_token}/getChatMember"
+                params = {"chat_id": channel, "user_id": telegram_id}
+                async with session.get(url, params=params) as resp:
+                    data = await resp.json()
+                    if resp.status == 200 and data.get("ok"):
+                        status = data["result"]["status"]
+                        if status not in ["creator", "administrator", "member", "restricted"]:
+                            unsubscribed.append(channel)
+                    else:
+                        # Kanal topilmadi yoki boshqa xato - obunasiz deb hisoblamaymiz
+                        pass
+    except Exception as e:
+        print(f"[Subscription check error]: {e}")
+
+    return unsubscribed
+
 # ---------------------------------------------------------------------------
 # YORDAMCHI: Bot status olish / yaratish
 # ---------------------------------------------------------------------------
@@ -44,7 +79,7 @@ def get_or_create_bot_status(db: Session) -> models.BotStatus:
 # QUIZ ENDPOINTS
 # ---------------------------------------------------------------------------
 @router.post("/auth")
-def auth_user(auth_data: schemas.AuthUser, db: Session = Depends(get_db)):
+async def auth_user(auth_data: schemas.AuthUser, db: Session = Depends(get_db)):
     """Userni yangilash yoki qo'shish va tizim holatini tekshirish"""
     user = db.query(models.User).filter(models.User.telegram_id == auth_data.telegram_id).first()
     if not user:
@@ -69,11 +104,18 @@ def auth_user(auth_data: schemas.AuthUser, db: Session = Depends(get_db)):
     # Adminligini tekshirish
     is_admin = (str(auth_data.telegram_id).strip() in ALLOWED_ADMINS) or (user.is_admin if user else False)
 
+    # Majburiy obuna tekshirish (adminlar uchun o'tkazib yuboriladi)
+    unsubscribed_channels = []
+    if not is_admin and REQUIRED_CHANNELS:
+        unsubscribed_channels = await _check_user_subscriptions(auth_data.telegram_id)
+
     return {
         "status": "ok",
         "is_restricted": is_restricted,
         "restriction_message": restriction_message,
-        "is_admin": is_admin
+        "is_admin": is_admin,
+        "is_subscribed": len(unsubscribed_channels) == 0,
+        "unsubscribed_channels": unsubscribed_channels
     }
 
 
