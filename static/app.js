@@ -76,7 +76,7 @@ const app = {
         const av = document.getElementById('avatarCircle');
         if (av) av.textContent = this.user.first_name.charAt(0).toUpperCase();
 
-        // Auth & status check
+        // Auth & obuna tekshirish
         const isRestricted = await this.authUser();
 
         if (!isRestricted) {
@@ -86,6 +86,9 @@ const app = {
             if (startView === 'resultsView') {
                 this.loadResults();
             }
+            // Muvaffaqiyatli kirish — davriy tekshirishni boshlaymiz
+            // (agar foydalanuvchi kanaldan chiqsa, 2 daqiqada bloklanadi)
+            this._startPeriodicCheck();
         }
 
         // joinCodeInput: autocomplete va tarix o'chirish
@@ -110,44 +113,102 @@ const app = {
                     username: this.user.username || null
                 })
             });
-            if (res.ok) {
-                const data = await res.json();
-                const isAdmin = data.is_admin;
-                const isRestricted = data.is_restricted;
 
-                // Admin tugmasini ko'rsatish
-                if (isAdmin) {
-                    const btn = document.getElementById('adminBtn');
-                    if (btn) btn.style.display = 'flex';
-                }
-
-                // Agar bot cheklangan bo'lsa va foydalanuvchi admin bo'lmasa
-                if (isRestricted && !isAdmin) {
-                    const msgEl = document.getElementById('maintenanceMessage');
-                    if (msgEl) msgEl.textContent = data.restriction_message;
-                    this.showView('maintenanceView');
-                    return true; // cheklangan holat
-                }
-
-                // Majburiy kanalga obuna tekshirish
-                if (data.is_subscribed === false && !isAdmin) {
-                    this._showSubscriptionModal(data.unsubscribed_channels || []);
-                    return true; // cheklangan holat
-                }
+            if (!res.ok) {
+                // Server xato berdi — xavfsizlik uchun kirish bloklanadi
+                this._showErrorModal('Server xatoligi yuz berdi. Iltimos, qaytadan urinib ko\'ring.');
+                return true;
             }
+
+            const data = await res.json();
+            const isAdmin = data.is_admin;
+            const isRestricted = data.is_restricted;
+
+            // Admin tugmasini ko'rsatish
+            if (isAdmin) {
+                const btn = document.getElementById('adminBtn');
+                if (btn) btn.style.display = 'flex';
+            }
+
+            // Bot cheklangan va foydalanuvchi admin emas
+            if (isRestricted && !isAdmin) {
+                const msgEl = document.getElementById('maintenanceMessage');
+                if (msgEl) msgEl.textContent = data.restriction_message;
+                this.showView('maintenanceView');
+                // Davriy tekshirishni to'xtatamiz (texnik ishlar paytida)
+                this._stopPeriodicCheck();
+                return true;
+            }
+
+            // Majburiy obuna tekshirish
+            if (data.is_subscribed === false && !isAdmin) {
+                this._showSubscriptionModal(data.unsubscribed_channels || []);
+                return true;
+            }
+
+            // Hamma joyida — modalni tozalaymiz
+            const modal = document.getElementById('subscriptionModal');
+            if (modal) modal.remove();
+            return false; // kirish ruxsat berildi
+
         } catch (e) {
-            console.error("Auth xatosi:", e);
+            // MUHIM: Tarmoq xato bo'lsa ham kirish bloklanadi (eski kod false qaytarardi — bu xato edi!)
+            console.error('[Auth] Tarmoq xatosi:', e);
+            this._showErrorModal('Tarmoq xatosi. Internet aloqangizni tekshiring va qaytadan urinib ko\'ring.');
+            return true;
         }
-        return false; // cheklanmagan yoki admin
+    },
+
+    // Xato modali (tarmoq/server xatolari uchun)
+    _showErrorModal(message) {
+        const old = document.getElementById('errorModal');
+        if (old) old.remove();
+
+        const modal = document.createElement('div');
+        modal.id = 'errorModal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,0.97);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;';
+        modal.innerHTML = `
+            <div style="max-width:380px;width:100%;text-align:center;font-family:'Inter',sans-serif;">
+                <div style="font-size:3.5rem;margin-bottom:16px;">⚠️</div>
+                <h3 style="color:#f1f5f9;font-weight:700;margin-bottom:12px;">Xatolik</h3>
+                <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:24px;line-height:1.6;">${message}</p>
+                <button onclick="location.reload()"
+                    style="width:100%;padding:14px;background:linear-gradient(135deg,#ef4444,#f87171);color:white;border:none;border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;">
+                    🔄 Qayta urinish
+                </button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    },
+
+    // Davriy obuna tekshirish (har 2 daqiqada)
+    _startPeriodicCheck() {
+        this._stopPeriodicCheck();
+        this._periodicCheckId = setInterval(async () => {
+            const isRestricted = await this.authUser();
+            // authUser() o'zi modal ko'rsatadi — bu yerda faqat log
+            if (isRestricted) {
+                console.log('[PeriodicCheck] Foydalanuvchi bloklanadi');
+            }
+        }, 2 * 60 * 1000); // 2 daqiqa
+    },
+
+    _stopPeriodicCheck() {
+        if (this._periodicCheckId) {
+            clearInterval(this._periodicCheckId);
+            this._periodicCheckId = null;
+        }
     },
 
     _showSubscriptionModal(channels) {
-        // Eski modalni o'chirish
-        const old = document.getElementById('subscriptionModal');
-        if (old) old.remove();
+        // Eski modal va xato modallarni o'chirish
+        ['subscriptionModal', 'errorModal'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        });
 
-        const channelBtns = channels.map(ch => `
-            <a href="https://t.me/${ch.replace('@','')}"
+        const channelBtns = channels.length > 0 ? channels.map(ch => `
+            <a href="https://t.me/${ch.replace('@', '')}"
                target="_blank"
                style="display:flex;align-items:center;gap:10px;background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px 18px;color:#f1f5f9;text-decoration:none;font-weight:600;font-size:0.95rem;transition:0.2s;"
                onmouseover="this.style.background='#334155'"
@@ -156,29 +217,39 @@ const app = {
                 <span>${ch}</span>
                 <span style="margin-left:auto;font-size:0.8rem;color:#38bdf8;">A'zo bo'lish →</span>
             </a>
-        `).join('');
+        `).join('') : '<p style="color:#94a3b8;font-size:0.85rem;">Kanal ro\'yxati yuklanmoqda...</p>';
 
         const modal = document.createElement('div');
         modal.id = 'subscriptionModal';
-        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,0.97);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;';
+        // Muhim: pointer-events:all va user-select:none — modal yopib bo'lmaydi
+        modal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(2,6,23,0.98);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;user-select:none;';
         modal.innerHTML = `
             <div style="max-width:420px;width:100%;text-align:center;font-family:'Inter',sans-serif;">
                 <div style="font-size:3.5rem;margin-bottom:12px;">🔒</div>
                 <h2 style="color:#f1f5f9;font-size:1.4rem;font-weight:700;margin-bottom:8px;">Kanalga a'zo bo'ling</h2>
-                <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:24px;line-height:1.5;">Botdan foydalanish uchun quyidagi kanal(lar)ga a'zo bo'ling, so'ngra "Tekshirish" tugmasini bosing.</p>
+                <p style="color:#94a3b8;font-size:0.9rem;margin-bottom:24px;line-height:1.5;">
+                    Botdan foydalanish uchun quyidagi kanal(lar)ga a'zo bo'ling,<br>so'ngra <b style="color:#f1f5f9;">"Tekshirish"</b> tugmasini bosing.
+                </p>
                 <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px;">
                     ${channelBtns}
                 </div>
                 <button id="checkSubBtn"
-                    style="width:100%;padding:16px;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border:none;border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;transition:0.2s;box-shadow:0 4px 20px rgba(99,102,241,0.4);"
-                    onmouseover="this.style.opacity='0.9'"
-                    onmouseout="this.style.opacity='1'">
+                    style="width:100%;padding:16px;background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border:none;border-radius:14px;font-weight:700;font-size:1rem;cursor:pointer;box-shadow:0 4px 20px rgba(99,102,241,0.4);">
                     ✅ A'zo bo'ldim — Tekshirish
                 </button>
+                <p style="margin-top:16px;font-size:0.75rem;color:#475569;">
+                    Obunasiz botdan foydalanib bo'lmaydi
+                </p>
             </div>
         `;
 
+        // Modalni body ga qo'shish — eng oxirida bo'lishi uchun
         document.body.appendChild(modal);
+
+        // Back tugmasini (Android) bloklash
+        const blockBack = (e) => e.preventDefault();
+        window.addEventListener('popstate', blockBack);
+        history.pushState(null, '', location.href);
 
         // Tekshirish tugmasi
         document.getElementById('checkSubBtn').addEventListener('click', async () => {
@@ -188,14 +259,14 @@ const app = {
 
             const isRestricted = await this.authUser();
             if (!isRestricted) {
-                // Obuna qilindi!
-                modal.remove();
+                // Muvaffaqiyatli — modal authUser() ichida olib tashlandi
+                window.removeEventListener('popstate', blockBack);
                 const urlParams = new URLSearchParams(window.location.search);
-                const startView = urlParams.get('view') || 'mainMenu';
-                this.showView(startView);
+                this.showView(urlParams.get('view') || 'mainMenu');
+                this._startPeriodicCheck(); // Davriy tekshirishni boshlaymiz
             } else {
-                btn.textContent = '❌ Hali a\'zo emassiz. Qayta urinib ko\'ring';
-                btn.disabled = false;
+                // Hali obuna bo'lmagan — yangi modal authUser() da ko'rsatildi
+                window.removeEventListener('popstate', blockBack);
             }
         });
     },

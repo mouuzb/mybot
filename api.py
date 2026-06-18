@@ -24,41 +24,60 @@ def restore_db(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Admin ID lari (Haqiqiy va Test)
-ALLOWED_ADMINS = ["7294699676", "123456789", os.getenv("ADMIN_TELEGRAM_ID", "").strip()]
+# Admin ID lari (faqat haqiqiy IDlar, test IDsiz)
+_env_admin = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+ALLOWED_ADMINS = list(filter(None, ["7294699676", _env_admin]))
 
-# Majburiy obuna kanallari
-_REQUIRED_CHANNELS_STR = os.getenv("REQUIRED_CHANNELS", "").strip()
-REQUIRED_CHANNELS = [ch.strip() for ch in _REQUIRED_CHANNELS_STR.split(",") if ch.strip()]
+# Majburiy obuna kanallari — har safar env dan o'qiladi (request time)
 
 async def _check_user_subscriptions(telegram_id: int) -> list:
     """Foydalanuvchi barcha majburiy kanallarga obuna bo'lganligini tekshirish.
-    Obuna bo'lmagan kanallar ro'yxatini qaytaradi. Bo'sh ro'yxat = hammasi OK."""
-    if not REQUIRED_CHANNELS:
-        return []
+    Obuna bo'lmagan kanallar ro'yxatini qaytaradi. Bo'sh ro'yxat = hammasi OK.
+    MUHIM: Har safar env dan o'qiladi — restart shart emas."""
+    # Har safar env dan o'qish (module import da emas!)
+    channels_str = os.getenv("REQUIRED_CHANNELS", "").strip()
+    channels = [ch.strip() for ch in channels_str.split(",") if ch.strip()]
+
+    if not channels:
+        return []  # Kanallar sozlanmagan → o'tkazib yuborish
 
     bot_token = os.getenv("BOT_TOKEN", "")
     if not bot_token:
-        return []
+        # Token yo'q → tekshirib bo'lmaydi → xavfsizlik uchun hammasini bloklaymiz
+        print("[Sub check] BOT_TOKEN yo'q, barcha kanallar tekshirib bo'lmadi")
+        return channels
 
     unsubscribed = []
     try:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
-            for channel in REQUIRED_CHANNELS:
-                url = f"https://api.telegram.org/bot{bot_token}/getChatMember"
-                params = {"chat_id": channel, "user_id": telegram_id}
-                async with session.get(url, params=params) as resp:
-                    data = await resp.json()
-                    if resp.status == 200 and data.get("ok"):
-                        status = data["result"]["status"]
-                        if status not in ["creator", "administrator", "member", "restricted"]:
-                            unsubscribed.append(channel)
-                    else:
-                        # Kanal topilmadi yoki boshqa xato - obunasiz deb hisoblamaymiz
-                        pass
+        timeout = aiohttp.ClientTimeout(total=8)  # 8 soniya timeout
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for channel in channels:
+                try:
+                    url = f"https://api.telegram.org/bot{bot_token}/getChatMember"
+                    params = {"chat_id": channel, "user_id": telegram_id}
+                    async with session.get(url, params=params) as resp:
+                        data = await resp.json()
+                        if resp.status == 200 and data.get("ok"):
+                            status = data["result"]["status"]
+                            if status not in ["creator", "administrator", "member", "restricted"]:
+                                unsubscribed.append(channel)
+                                print(f"[Sub check] {telegram_id} → {channel}: obunasiz ({status})")
+                            else:
+                                print(f"[Sub check] {telegram_id} → {channel}: obunali ({status})")
+                        else:
+                            # Telegram API xato berdi (masalan: bot kanalda admin emas)
+                            # Bu holda foydalanuvchini bloklmaymiz (bot konfiguratsiya muammosi)
+                            error_desc = data.get('description', 'unknown') if isinstance(data, dict) else str(data)
+                            print(f"[Sub check] {channel} API xato: {error_desc} — o'tkazib yuborildi")
+                except Exception as ch_err:
+                    # Bitta kanal uchun xato — log yozamiz, bloklmaymiz
+                    print(f"[Sub check] {channel} tekshirishda xato: {ch_err}")
     except Exception as e:
-        print(f"[Subscription check error]: {e}")
+        # Jiddiy xato (aiohttp import xato, tarmoq muammosi va boshq.)
+        print(f"[Sub check] Jiddiy xato: {e}")
+        # Xavfsiz rejim: tekshirib bo'lmasa, hammasini qaytaramiz
+        return channels
 
     return unsubscribed
 
