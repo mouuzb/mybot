@@ -124,8 +124,10 @@ async def auth_user(auth_data: schemas.AuthUser, db: Session = Depends(get_db)):
     is_admin = (str(auth_data.telegram_id).strip() in ALLOWED_ADMINS) or (user.is_admin if user else False)
 
     # Majburiy obuna tekshirish (adminlar uchun o'tkazib yuboriladi)
+    # MUHIM: REQUIRED_CHANNELS ni har safar env dan o'qiymiz (modul darajasida emas!)
+    _channels_now = [ch.strip() for ch in os.getenv("REQUIRED_CHANNELS", "").split(",") if ch.strip()]
     unsubscribed_channels = []
-    if not is_admin and REQUIRED_CHANNELS:
+    if not is_admin and _channels_now:
         unsubscribed_channels = await _check_user_subscriptions(auth_data.telegram_id)
 
     return {
