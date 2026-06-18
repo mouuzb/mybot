@@ -213,9 +213,7 @@ class Form(StatesGroup):
 def get_main_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📚 Quiz (WebApp)", web_app=WebAppInfo(url=WEBAPP_URL))],
             [KeyboardButton(text="📅 Dars Jadvali"), KeyboardButton(text="🔔 Obuna Bo'lish")],
-            [KeyboardButton(text="📊 Mening Natijalarim", web_app=WebAppInfo(url=f"{WEBAPP_URL}?view=resultsView"))]
         ],
         resize_keyboard=True
     )
